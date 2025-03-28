@@ -11,13 +11,13 @@ GITHUB_API_KEY = os.getenv("GITHUB_API_KEY")
 
 def get_repo_details(repo_url):
     """
-    Fetch README content, stats, contributors, and file list for a GitHub repository.
+    Fetch README content, stats, contributors, and file contents for a GitHub repository.
     
     Args:
         repo_url (str): GitHub repository URL (e.g., https://github.com/owner/repo)
     
     Returns:
-        tuple: (readme_text, stats, contributors, file_list)
+        tuple: (readme_text, stats, contributors, file_contents)
     """
     if not GITHUB_API_KEY:
         raise ValueError("GITHUB_API_KEY not found in environment variables.")
@@ -28,7 +28,7 @@ def get_repo_details(repo_url):
         if not owner or not repo:
             raise ValueError("Invalid repository URL format.")
     except IndexError:
-        return "Invalid URL: Could not parse owner/repo.", {}, [], []
+        return "Invalid URL: Could not parse owner/repo.", {}, [], {}
 
     headers = {"Authorization": f"token {GITHUB_API_KEY}", "Accept": "application/vnd.github.v3+json"}
 
@@ -71,14 +71,14 @@ def get_repo_details(repo_url):
     except requests.RequestException:
         contributors = []
 
-    # Fetch File List
-    file_list = get_repo_files(owner, repo, headers)
+    # Fetch File Contents
+    file_contents = get_repo_files(owner, repo, headers)
 
-    return readme_text, stats, contributors, file_list
+    return readme_text, stats, contributors, file_contents
 
 def get_repo_files(owner, repo, headers):
     """
-    Fetch all file names from the repository's default branch.
+    Fetch all file names and their contents from the repository's default branch.
     
     Args:
         owner (str): Repository owner
@@ -86,31 +86,51 @@ def get_repo_files(owner, repo, headers):
         headers (dict): Authorization headers
     
     Returns:
-        list: List of file paths
+        dict: {file_path: content}
     """
-    # First, get the default branch
+    # Get the default branch
     repo_url = f"https://api.github.com/repos/{owner}/{repo}"
     try:
         repo_res = requests.get(repo_url, headers=headers, timeout=10)
         if repo_res.status_code != 200:
-            return []
+            return {}
         default_branch = repo_res.json().get("default_branch", "main")
     except requests.RequestException:
-        return []
+        return {}
 
-    # Fetch the tree from the default branch
+    # Fetch the tree
     tree_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+    file_contents = {}
     try:
         tree_res = requests.get(tree_url, headers=headers, timeout=10)
-        if tree_res.status_code == 200:
-            tree_data = tree_res.json()
-            # Extract file paths (exclude directories)
-            file_list = [item["path"] for item in tree_data.get("tree", []) if item["type"] == "blob"]
-            return file_list
-        else:
-            return []
+        if tree_res.status_code != 200:
+            return {}
+        
+        tree_data = tree_res.json()
+        files = [item for item in tree_data.get("tree", []) if item["type"] == "blob"]
+        
+        # Fetch content for each file
+        for file in files:
+            file_path = file["path"]
+            content_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+            try:
+                content_res = requests.get(content_url, headers=headers, timeout=10)
+                if content_res.status_code == 200:
+                    content_data = content_res.json()
+                    if "content" in content_data:
+                        # Decode base64 content
+                        content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        file_contents[file_path] = content
+                    else:
+                        file_contents[file_path] = "Content not available."
+                else:
+                    file_contents[file_path] = f"Error fetching content (Status: {content_res.status_code})."
+            except requests.RequestException as e:
+                file_contents[file_path] = f"Error fetching content: {str(e)}"
     except requests.RequestException:
-        return []
+        return {}
+
+    return file_contents
 
 # Example usage
 if __name__ == "__main__":
@@ -119,4 +139,4 @@ if __name__ == "__main__":
     print("README:", readme[:200])
     print("Stats:", stats)
     print("Contributors:", contributors)
-    print("Files:", files[:10])  # Print first 10 files for brevity
+    print("Files (first 2):", {k: v[:50] for k, v in list(files.items())[:2]})
