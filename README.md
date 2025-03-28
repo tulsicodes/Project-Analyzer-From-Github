@@ -50,4 +50,7 @@ python-dotenv
     git add .
     git commit -m "Adding all the files"
     git push origin main
+## Images of the Project
+![image](https://github.com/user-attachments/assets/649c052f-cd4f-4cf0-a6a2-8d3691f266f7)
+![image](https://github.com/user-attachments/assets/3586e1f4-130a-43b1-8732-531968118320)
 
